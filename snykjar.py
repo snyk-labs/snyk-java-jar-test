@@ -12,6 +12,8 @@ from pathlib import Path
 
 
 org_id = None
+_snyk_api_headers = None
+snyk_api_base_url = 'https://snyk.io/api/v1/'
 
 
 def parse_command_line_args(command_line_args):
@@ -33,20 +35,6 @@ def parse_command_line_args(command_line_args):
     return args
 
 
-# https://snyk.docs.apiary.io/#reference/test/maven/test-for-issues-in-a-public-package-by-group-id,-artifact-id-and-version
-def snyk_test_maven(package_group_id, package_artifact_id, version, org_id=None):
-    if org_id:
-        full_api_url = '%stest/maven/%s/%s/%s?org=%s' % (
-            snyk_api_base_url, package_group_id, package_artifact_id, version, org_id)
-    else:
-        full_api_url = '%stest/maven/%s/%s/%s' % (
-            snyk_api_base_url, package_group_id, package_artifact_id, version)
-
-    resp = requests.get(full_api_url, headers=snyk_api_headers)
-    obj_json_response_content = resp.json()
-    return obj_json_response_content
-
-
 def get_token():
     home = str(Path.home())
     path = '%s/.config/configstore/snyk.json' % home
@@ -62,11 +50,17 @@ def get_token():
         quit()
 
 
-snyk_api_base_url = 'https://snyk.io/api/v1/'
-snyk_token = get_token()
-snyk_api_headers = {
-    'Authorization': 'token %s' % snyk_token
-}
+def get_snyk_api_headers():
+    global _snyk_api_headers
+
+    if not _snyk_api_headers:
+        snyk_token = get_token()
+
+        _snyk_api_headers = {
+            'Authorization': 'token %s' % snyk_token
+        }
+
+    return _snyk_api_headers
 
 
 def snyk_test_java_package(package_group_id, package_artifact_id, package_version):
@@ -79,6 +73,9 @@ def snyk_test_java_package(package_group_id, package_artifact_id, package_versio
         full_api_url = '%stest/maven/%s/%s/%s' % (
             snyk_api_base_url, package_group_id, package_artifact_id, package_version)
 
+    # https://snyk.docs.apiary.io/#reference/test/maven/test-for-issues-in-a-public-package-by-group-id,-artifact-id-and-version
+
+    snyk_api_headers = get_snyk_api_headers()
     resp = requests.get(full_api_url, headers=snyk_api_headers)
     json_res = resp.json()
 
