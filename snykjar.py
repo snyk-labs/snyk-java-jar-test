@@ -35,9 +35,11 @@ def parse_command_line_args(command_line_args):
     return args
 
 
-def get_token():
+def get_token(token_file_path=None):
     home = str(Path.home())
-    path = '%s/.config/configstore/snyk.json' % home
+    default_path = '%s/.config/configstore/snyk.json' % home
+
+    path = token_file_path or default_path
 
     try:
         with open(path, 'r') as f:
@@ -50,11 +52,11 @@ def get_token():
         quit()
 
 
-def get_snyk_api_headers():
+def get_snyk_api_headers(token_file_path=None):
     global _snyk_api_headers
 
     if not _snyk_api_headers:
-        snyk_token = get_token()
+        snyk_token = get_token(token_file_path)
 
         _snyk_api_headers = {
             'Authorization': 'token %s' % snyk_token
@@ -226,25 +228,29 @@ def get_package_info_by_analyzing_jar_contents(jar_path):
                 rel_path = f.filename
 
                 if rel_path.endswith('pom.xml'):
-                    print(rel_path)
-                    with jar_as_zipfile.open(rel_path, 'r') as jar_manifest_file:
-                        pom_contents = jar_manifest_file.read()
-                        x = pom_contents.decode('utf-8')
-                        doc = xmltodict.parse(x)
-                        group_id = doc['project']['groupId']
-                        artifact_id = doc['project']['artifactId']
-                        version = doc['project']['version']
+                    try:
+                        print(rel_path)
+                        with jar_as_zipfile.open(rel_path, 'r') as jar_manifest_file:
+                            pom_contents = jar_manifest_file.read()
+                            x = pom_contents.decode('utf-8')
+                            doc = xmltodict.parse(x)
+                            group_id = doc['project']['groupId']
+                            artifact_id = doc['project']['artifactId']
+                            version = doc['project']['version']
 
-                        print('Found pom.xml with %s:%s@%s' % (group_id, artifact_id, version))
+                            print('Found pom.xml with %s:%s@%s' % (group_id, artifact_id, version))
 
-                        package_info = {
-                            'fullId': '%s:%s:%s' % (group_id, artifact_id, version),
-                            'groupId': group_id,
-                            'artifactId': artifact_id,
-                            'version': version
-                        }
+                            package_info = {
+                                'fullId': '%s:%s:%s' % (group_id, artifact_id, version),
+                                'groupId': group_id,
+                                'artifactId': artifact_id,
+                                'version': version
+                            }
 
-                        all_package_results.append(package_info)
+                            all_package_results.append(package_info)
+                    except KeyError as ke:
+                        print('Warning - detected pom does not contain groupId/artifactId/version')
+
     except zipfile.BadZipFile as e:
         print('Could not unzip JAR file: %s' % jar_path)
 
@@ -254,12 +260,13 @@ def get_package_info_by_analyzing_jar_contents(jar_path):
 def analyze_jar(jar_path):
     print('Identifying package for %s' % jar_path)
 
-    # Analyze by searching for pom.xml files in the JAR which identify the package
-    matching_packages_from_jar_contents = get_package_info_by_analyzing_jar_contents(jar_path)
-
     matching_packages_from_hash_lookup = []
-    if not matching_packages_from_jar_contents:
-        matching_packages_from_hash_lookup = get_package_info_by_jar_file_hash(jar_path)
+    matching_packages_from_hash_lookup = get_package_info_by_jar_file_hash(jar_path)
+
+    # Analyze by searching for pom.xml files in the JAR which identify the package
+    matching_packages_from_jar_contents = []
+    if not matching_packages_from_hash_lookup:
+        matching_packages_from_jar_contents = get_package_info_by_analyzing_jar_contents(jar_path)
 
     matching_packages_from_filename_lookup = []
     if not matching_packages_from_hash_lookup:
@@ -269,12 +276,12 @@ def analyze_jar(jar_path):
     results = []
     packages_to_test = []
 
-    if len(matching_packages_from_jar_contents) > 0:
+    if len(matching_packages_from_hash_lookup) > 0:
+        packages_to_test = matching_packages_from_hash_lookup
+
+    elif len(matching_packages_from_jar_contents) > 0:
         # test the packages identified by pom.xml files in the JAR
         packages_to_test = matching_packages_from_jar_contents
-
-    elif len(matching_packages_from_hash_lookup) > 0:
-        packages_to_test = matching_packages_from_hash_lookup
 
     elif len(matching_packages_from_filename_lookup) > 0:
         # no pom.xml found - have to rely on Maven lookup
