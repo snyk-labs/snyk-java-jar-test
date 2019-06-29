@@ -1,7 +1,4 @@
 import snykjar
-import tempfile
-import json
-from mock import patch
 
 
 def test_arg_parsing_works_for_single_dot():
@@ -83,42 +80,3 @@ def test_arg_parsing_handles_multiple_jars():
     assert args.jar_path[1] == 'somejar2.jar'
     assert args.jar_path[2] == 'somejar3.jar'
 
-
-def test_can_read_token_from_snyk_api_config_file():
-    obj_token_json = {
-        'api': 'test-token'
-    }
-
-    with tempfile.NamedTemporaryFile() as temp_token_file:
-        with open(temp_token_file.name, 'w') as temp_token_file_write:
-            json.dump(obj_token_json, temp_token_file_write, indent=2)
-
-        temp_filename = temp_token_file.name
-        returned_token = snykjar.get_token(temp_filename)
-        assert returned_token == 'test-token'
-
-
-@patch('snykjar._snyk_api_headers', None)  # this makes sure the value of snykjar._snyk_api_headers is reset to None after this test
-def test_snyk_api_headers_obj_properly_constructed():
-    with patch('snykjar.get_token', return_value='test-token-test_snyk_api_headers_obj_properly_constructed') as mock_get_token:
-        snyk_headers_obj = snykjar.get_snyk_api_headers()
-        assert snyk_headers_obj['Authorization'] == 'token %s' % 'test-token-test_snyk_api_headers_obj_properly_constructed'
-
-
-# This is a nice test, but is perhaps a bit redundant given the above two
-@patch('snykjar._snyk_api_headers', None)  # this makes sure the value of snykjar._snyk_api_headers is reset to None after this test
-def test_can_get_snyk_api_headers_with_token_from_snyk_api_config_file():
-    obj_token_json = {
-        'api': 'test-token-test_can_get_snyk_api_headers_with_token_from_snyk_api_config_file'
-    }
-
-    with tempfile.NamedTemporaryFile() as temp_token_file:
-        with open(temp_token_file.name, 'w') as temp_token_file_write:
-            json.dump(obj_token_json, temp_token_file_write, indent=2)
-
-        temp_filename = temp_token_file.name
-
-        returned_token = snykjar.get_token(temp_filename)
-        assert returned_token == 'test-token-test_can_get_snyk_api_headers_with_token_from_snyk_api_config_file'
-        snyk_headers_obj = snykjar.get_snyk_api_headers(temp_filename)
-        assert snyk_headers_obj['Authorization'] == 'token %s' % 'test-token-test_can_get_snyk_api_headers_with_token_from_snyk_api_config_file'
