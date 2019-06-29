@@ -12,7 +12,6 @@ from pathlib import Path
 
 
 org_id = None
-_snyk_api_headers = None
 snyk_api_base_url = 'https://snyk.io/api/v1/'
 
 
@@ -35,37 +34,45 @@ def parse_command_line_args(command_line_args):
     return args
 
 
-def get_token(token_file_path=None):
+def get_default_token_path():
     home = str(Path.home())
-    default_path = '%s/.config/configstore/snyk.json' % home
+    default_token_path = '%s/.config/configstore/snyk.json' % home
+    return default_token_path
 
-    path = token_file_path or default_path
+
+def get_token(token_file_path):
+    path = token_file_path
 
     try:
         with open(path, 'r') as f:
             json_obj = json.load(f)
             token = json_obj['api']
             return token
-    except:
+    except FileNotFoundError as fnfe:
         print('Snyk auth token not found at %s' % path)
         print('Run `snyk auth` (see https://github.com/snyk/snyk#installation) or manually create this file with your token.')
-        quit()
+        raise fnfe
+    except KeyError as ke:
+        print('Snyk auth token file is not properly formed: %s' % path)
+        print('Run `snyk auth` (see https://github.com/snyk/snyk#installation) or manually create this file with your token.')
+        raise ke
 
 
-def get_snyk_api_headers(token_file_path=None):
-    global _snyk_api_headers
-
-    if not _snyk_api_headers:
-        snyk_token = get_token(token_file_path)
-
-        _snyk_api_headers = {
-            'Authorization': 'token %s' % snyk_token
-        }
-
-    return _snyk_api_headers
+def get_snyk_api_headers(snyk_token):
+    snyk_api_headers = {
+        'Authorization': 'token %s' % snyk_token
+    }
+    return snyk_api_headers
 
 
-def snyk_test_java_package(package_group_id, package_artifact_id, package_version):
+def validate_token(snyk_token):
+    h = get_snyk_api_headers(snyk_token)
+    full_api_url = 'https://snyk.io/api/v1/'
+    resp = requests.get(full_api_url, headers=h)
+    return resp.ok
+
+
+def snyk_test_java_package(snyk_token, package_group_id, package_artifact_id, package_version):
     print('Snyk test package %s:%s@%s...' % (package_group_id, package_artifact_id, package_version))
 
     if org_id:
@@ -77,7 +84,7 @@ def snyk_test_java_package(package_group_id, package_artifact_id, package_versio
 
     # https://snyk.docs.apiary.io/#reference/test/maven/test-for-issues-in-a-public-package-by-group-id,-artifact-id-and-version
 
-    snyk_api_headers = get_snyk_api_headers()
+    snyk_api_headers = get_snyk_api_headers(snyk_token)
     resp = requests.get(full_api_url, headers=snyk_api_headers)
     json_res = resp.json()
 
@@ -257,7 +264,7 @@ def get_package_info_by_analyzing_jar_contents(jar_path):
     return all_package_results
 
 
-def analyze_jar(jar_path):
+def analyze_jar(jar_path, snyk_token):
     print('Identifying package for %s' % jar_path)
 
     matching_packages_from_hash_lookup = []
@@ -293,7 +300,7 @@ def analyze_jar(jar_path):
         print('No package identified for %s' % jar_path)
 
     for p in packages_to_test:
-        issues = snyk_test_java_package(p['groupId'], p['artifactId'], p['version'])
+        issues = snyk_test_java_package(snyk_token, p['groupId'], p['artifactId'], p['version'])
         new_res = {
             'fullId': p['fullId'],
             'groupId': p['groupId'],
@@ -319,10 +326,24 @@ def get_list_of_jars_in_directory(directory_path):
     return jars_list
 
 
-if __name__ == '__main__':
-    args = parse_command_line_args(sys.argv[1:])
+def validate_token(snyk_token):
+    h = get_snyk_api_headers(snyk_token)
+    full_api_url = 'https://snyk.io/api/v1/'
+    resp = requests.get(full_api_url, headers=h)
+    return resp.ok
+
+
+def main(args):
+    args = parse_command_line_args(args)
     if args.orgId:
         org_id = args.orgId
+
+    snyk_token_path = get_default_token_path()
+    snyk_token = get_token(snyk_token_path)
+    token_is_valid = validate_token(snyk_token)
+    if not token_is_valid:
+        print('invalid token')
+        sys.exit('invalid token')
 
     jars_to_test = []
 
@@ -355,7 +376,7 @@ if __name__ == '__main__':
         all_results = []
         for j in jars_to_test:
             print('Analyzing jar %s...' % j)
-            jar_results = analyze_jar(j)
+            jar_results = analyze_jar(j, snyk_token)
 
             obj = {
                 'jar': j,
@@ -369,3 +390,8 @@ if __name__ == '__main__':
                 print(json.dump(all_results, output_json_file, indent=2))
 
     print('\ndone')
+
+
+if __name__ == '__main__':
+    command_line_args = sys.argv[1:]
+    main(command_line_args)
