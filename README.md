@@ -50,3 +50,4 @@ python snykjar.py /path/to/jars
 
 `--orgId` - you only need to use this if your default organization in Snyk is not an organization that has API access. In most cases you won't need to use this. You can see your default Snyk organization by going to [Account Settings->Preferred Organization](https://app.snyk.io/account).
 
+`--outputPom=<path/to/output/pom.xml>` - use this if you just want to get a `pom.xml` generated as output with all the detected Java packages. If you use this option, you the detected packages will not be tested and you will not get JSON output even if you use the `--jsonOutput` option. You might want to use this option to generate a `pom.xml` and then either test it with the snyk CLI (ex `snyk test --file=pom.xml`) or push the list of detected Java packages into Snyk and test monitor them there using `snyk monitor --file=pom.xml --project-name=<my-java-jars-test>`. For this to work, the filename needs to be `pom.xml`.

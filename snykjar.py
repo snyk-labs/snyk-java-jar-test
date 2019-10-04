@@ -9,6 +9,8 @@ import io
 import os
 import pkg_resources
 from pathlib import Path
+import xml.etree.ElementTree as ET
+from xml.dom import minidom
 
 
 org_id = None
@@ -25,6 +27,9 @@ def parse_command_line_args(command_line_args):
 
     parser.add_argument('--jsonOutput', type=str,
                         help='Optional: name or path of JSON file to save results to in JSON format.')
+
+    parser.add_argument('--outputPom', type=str,
+                        help='Optional: name or path of pom.xml file in which to list of detected Java packages.')
 
     args = parser.parse_args(command_line_args)
 
@@ -264,7 +269,7 @@ def get_package_info_by_analyzing_jar_contents(jar_path):
     return all_package_results
 
 
-def analyze_jar(jar_path, snyk_token):
+def analyze_jar(jar_path, snyk_token, do_snyk_test):
     print('Identifying package for %s' % jar_path)
 
     matching_packages_from_hash_lookup = []
@@ -300,14 +305,17 @@ def analyze_jar(jar_path, snyk_token):
         print('No package identified for %s' % jar_path)
 
     for p in packages_to_test:
-        issues = snyk_test_java_package(snyk_token, p['groupId'], p['artifactId'], p['version'])
+        issues = None
+        if do_snyk_test:
+            issues = snyk_test_java_package(snyk_token, p['groupId'], p['artifactId'], p['version'])
+
         new_res = {
             'fullId': p['fullId'],
             'groupId': p['groupId'],
             'artifactId': p['artifactId'],
-            'version:': p['version'],
-            'vulnerabilities': issues['vulnerabilities'],
-            'license-issues': issues['licenses']
+            'version': p['version'],
+            'vulnerabilities': issues['vulnerabilities'] if issues else None,
+            'license-issues': issues['licenses'] if issues else None
         }
         results.append(new_res)
 
@@ -331,6 +339,52 @@ def validate_token(snyk_token):
     full_api_url = 'https://snyk.io/api/v1/'
     resp = requests.get(full_api_url, headers=h)
     return resp.ok
+
+
+def write_pom_output(output_filename, java_jars_info):
+    project = ET.Element('project')
+
+    modelVersion = ET.SubElement(project, 'modelVersion')
+    modelVersion.text = '4.0.0'
+
+    pom_groupId = ET.SubElement(project, 'groupId')
+    pom_groupId.text = 'snyk-java-jar-test'
+
+    pom_artifactId = ET.SubElement(project, 'artifactId')
+    pom_artifactId.text = 'snyk-java-jar-test'
+
+    pom_packaging = ET.SubElement(project, 'packaging')
+    pom_packaging.text = 'pom'
+
+    pom_version = ET.SubElement(project, 'version')
+    pom_version.text = '1.0-SNAPSHOT'
+
+    dependencies = ET.SubElement(project, 'dependencies')
+
+    for jar_info in java_jars_info:
+        jar_name = jar_info['jar']
+        jar_file_comment = ET.Comment('from: %s' % os.path.basename(jar_name))
+
+        for p in jar_info['matching-packages']:
+            dep = ET.SubElement(dependencies, 'dependency')
+            dep.insert(0, jar_file_comment)
+
+            groupId = ET.SubElement(dep, 'groupId')
+            groupId.text = p['groupId']
+
+            artifactId = ET.SubElement(dep, 'artifactId')
+            artifactId.text = p['artifactId']
+
+            version = ET.SubElement(dep, 'version')
+            version.text = p['version']
+
+    xml_str_raw = ET.tostring(project)
+
+    parsed_with_minidom = minidom.parseString(xml_str_raw)
+    pretty_xml_str = parsed_with_minidom.toprettyxml(indent="\t")
+
+    with open(output_filename, 'w') as output_xml_file:
+        output_xml_file.write(pretty_xml_str)
 
 
 def main(args):
@@ -372,11 +426,15 @@ def main(args):
     else:
         jars_to_test = args.jar_path
 
+    # don't run a snyk test on each detected Java package if --outputPom is set
+    # because if you want the pom.xml output, it's probably because you want to test/monitor that with the Snyk CLI
+    do_snyk_test = False if args.outputPom else True
+
     if jars_to_test:
         all_results = []
         for j in jars_to_test:
             print('Analyzing jar %s...' % j)
-            jar_results = analyze_jar(j, snyk_token)
+            jar_results = analyze_jar(j, snyk_token, do_snyk_test)
 
             obj = {
                 'jar': j,
@@ -385,9 +443,12 @@ def main(args):
             all_results.append(obj)
             print()
 
-        if args.jsonOutput:
+        if do_snyk_test and args.jsonOutput:
             with open(args.jsonOutput, 'w') as output_json_file:
                 print(json.dump(all_results, output_json_file, indent=2))
+
+        if args.outputPom:
+            write_pom_output(args.outputPom, all_results)
 
     print('\ndone')
 
