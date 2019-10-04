@@ -80,3 +80,12 @@ def test_arg_parsing_handles_multiple_jars():
     assert args.jar_path[1] == 'somejar2.jar'
     assert args.jar_path[2] == 'somejar3.jar'
 
+
+def test_arg_parsing_handles_outputPom_parameter():
+    cl_args = ['--outputPom=output-pom.xml', 'somejar1.jar', 'somejar2.jar', 'somejar3.jar']
+    args = snykjar.parse_command_line_args(cl_args)
+    assert args.outputPom == 'output-pom.xml'
+    assert len(args.jar_path) == 3
+    assert args.jar_path[0] == cl_args[1]
+    assert args.jar_path[1] == cl_args[2]
+    assert args.jar_path[2] == cl_args[3]
